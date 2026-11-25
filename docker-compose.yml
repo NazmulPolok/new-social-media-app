@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nexushub_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nexushub
+      POSTGRES_PASSWORD: nexushub_secret_password
+      POSTGRES_DB: nexushub_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexushub -d nexushub_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    container_name: nexushub_mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexushub
+      MONGO_INITDB_ROOT_PASSWORD: nexushub_mongo_password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexushub_redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexushub_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://nexushub:nexushub_secret_password@postgres:5432/nexushub_db
+      MONGO_URL: mongodb://nexushub:nexushub_mongo_password@mongodb:27017/?authSource=admin
+      MONGO_DB_NAME: nexushub_mongo
+      REDIS_URL: redis://redis:6379/0
+      CACHE_TTL_SECONDS: 60
+      JWT_SECRET: nexushub-dev-jwt-secret-change-me-in-production
+      EMAIL_HMAC_SECRET: nexushub-dev-email-hmac-secret-change-me
+      WEBHOOK_SIGNING_SECRET: nexushub-dev-webhook-signing-secret-change-me
+      FRONTEND_ORIGIN: http://localhost:3000
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "8001:8000"
+    volumes:
+      - backend_uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexushub_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  backend_uploads:
